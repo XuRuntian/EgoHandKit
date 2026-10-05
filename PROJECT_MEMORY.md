@@ -129,3 +129,39 @@ These counts describe that historical run, not the projection-fix rerun.
 
 Temporary diagnostic files `/tmp/egohandkit_cases_audit.py` and
 `/tmp/egohandkit_cases_audit.json` may exist, but are not durable project assets.
+
+## Isolated Render Profiling (2026-10-04)
+
+Worktree: `/home/user/EgoHandKit-hand-opt`, branch `perf/hand-render`, based on
+`34b3b1c`. Original `/home/user/EgoHandKit` is unchanged. Optional timing dictionaries
+cover MANO fitting, image reads, renderer creation/scene/draw/delete, overlays,
+JPEG writes, and video image loading/encoding. No algorithm, thresholds, fitting
+batch size, iteration count, or renderer lifecycle changes are intended.
+
+The orchestration repo supplies a standalone replay of the saved final Parquet.
+Reference is the final directory in `ray_video_20261004_182731`, not raw backend
+meshes. Original frames must be regenerated; rendered JPEGs cannot be reused as
+source images. Replays use new output directories and compare fitting diagnostics
+and decoded JPEG pixels. Pixel equality is not human visual acceptance.
+
+Focused CPU tests: 21 passed, 1 skipped (MANO assets absent from host worktree).
+Full GPU replay and timing breakdown remain pending; repeated renderer creation
+is observed in code but is not yet proven to dominate runtime. Actor performance
+and EGL context reuse remain hypotheses. No new Ray dependency is added here.
+
+## EGL Backend Comparison (2026-10-05)
+
+Full identical-code replays in the orchestration repository confirmed Mesa
+llvmpipe in the preserved old hand image, NVIDIA RTX 4070 in the EGL-only fix.
+Rendering pipeline: 866.348 s CPU control versus 546.870 s GPU; drawing/readback
+411.812 versus 82.494 s. Both fit reports match the saved reference and render
+3095 hands over 2137 frames. GPU rasterization produces small pixel differences
+(max channel delta 15); detailed metrics and sampled visual inspection are in
+`docker/hand-env/egl-fix/VALIDATION.md` of the orchestration repo. Strict-comparison
+reports remain `comparison_mismatch`; differences were accepted for promotion,
+not erased. Local hand image `:dev` is now the EGL-fixed image, old tag retained.
+
+No Actor or renderer lifetime changes yet. Deletion remains about 212 s across
+1906 calls. Future reuse/Actor comparisons must keep the EGL backend constant;
+do not attribute this environment fix's benefit to Ray. Full MINT/HaMeR inference
+was not rerun for this comparison, so its end-to-end speedup is not measured.

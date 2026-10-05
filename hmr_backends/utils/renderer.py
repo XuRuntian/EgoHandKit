@@ -8,6 +8,8 @@ import trimesh
 import cv2
 from yacs.config import CfgNode
 from typing import List, Optional
+from time import perf_counter
+from render_profiling import record_timing
 
 def cam_crop_to_full(cam_bbox, box_center, box_size, img_size, focal_length=5000.):
     # Convert cam_bbox to full image
@@ -344,11 +346,15 @@ class Renderer:
             focal_length=None,
             is_right=None,
             camera_intrinsics=None,
+            timings=None,
         ):
 
+        started = perf_counter()
         renderer = pyrender.OffscreenRenderer(viewport_width=render_res[0],
                                               viewport_height=render_res[1],
                                               point_size=1.0)
+        record_timing(timings, 'renderer_create', started)
+        started = perf_counter()
         # material = pyrender.MetallicRoughnessMaterial(
         #     metallicFactor=0.0,
         #     alphaMode='OPAQUE',
@@ -393,9 +399,16 @@ class Renderer:
         for node in light_nodes:
             scene.add_node(node)
 
+        record_timing(timings, 'renderer_scene_build', started)
+        started = perf_counter()
         color, rend_depth = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
+        record_timing(timings, 'renderer_draw_readback', started)
+        started = perf_counter()
         color = color.astype(np.float32) / 255.0
+        record_timing(timings, 'renderer_color_convert', started)
+        started = perf_counter()
         renderer.delete()
+        record_timing(timings, 'renderer_delete', started)
 
         return color, rend_depth.astype(np.float32)
 

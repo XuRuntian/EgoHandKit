@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import pyarrow.parquet as pq
 import torch
+from time import perf_counter
+from render_profiling import record_timing
 
 from observation_frontend.depth_gate import (
     resolve_depth_camera_intrinsics, resolve_depth_frames, scale_camera_intrinsics,
@@ -163,7 +165,7 @@ def read_tracking(path):
 def render_tracking_parquet(path, frames, mano, renderer, out_dir, *, depth_dir,
                             expected_reference_camera=None, fps=30, steps=200,
                             max_rmse_m=0.03, batch_size=64,
-                            mesh_alpha=PARQUET_RENDER_MESH_ALPHA):
+                            mesh_alpha=PARQUET_RENDER_MESH_ALPHA, timings=None):
     """Render Parquet geometry only; frames supply image paths, never hand data."""
     from bbox_utils import create_video_from_images
 
@@ -198,10 +200,13 @@ def render_tracking_parquet(path, frames, mano, renderer, out_dir, *, depth_dir,
             targets.append(joints)
             sides.append(side)
     meshes = {}
+    fit_started = perf_counter()
     for start in range(0, len(targets), batch_size):
         stop = start + batch_size
         batch_targets = targets[start:stop]
+        started = perf_counter()
         vertices, _, errors = fit_mano_joints(mano, batch_targets, sides[start:stop], steps=steps)
+        record_timing(timings, 'mano_fit_batch', started)
         for record, mesh, joints, error in zip(records[start:stop], vertices, batch_targets, errors):
             if not np.isfinite(error) or not np.isfinite(mesh).all():
                 record['reason'] = 'nonfinite_fit'
@@ -214,6 +219,7 @@ def render_tracking_parquet(path, frames, mano, renderer, out_dir, *, depth_dir,
                 else:
                     record['rendered'] = True
                     meshes.setdefault(record['frame_idx'], []).append((record['side'], mesh, joints))
+    record_timing(timings, 'mano_fit_and_filter_total', fit_started)
     out_dir = Path(out_dir)
     render_dir = out_dir / 'parquet_render_frames'
     render_dir.mkdir(parents=True, exist_ok=True)
@@ -221,32 +227,46 @@ def render_tracking_parquet(path, frames, mano, renderer, out_dir, *, depth_dir,
         old_frame.unlink()
     for frame in frames:
         index = int(frame['frame_idx'])
+        frame_started = perf_counter()
+        started = perf_counter()
         image = cv2.imread(str(frame['img_path']))
+        record_timing(timings, 'frame_read_rgb', started)
         if image is None:
             raise ValueError(f"Cannot read image: {frame['img_path']}")
         hands = meshes.get(index, [])
         if hands:
+            started = perf_counter()
             depth = cv2.imread(str(depth_paths[index]), cv2.IMREAD_UNCHANGED)
             if depth is None:
                 raise ValueError(f'Cannot read depth dimensions for frame {index}')
             k = scale_camera_intrinsics(intrinsic, depth.shape[:2], image.shape[:2])
+            record_timing(timings, 'frame_read_depth_and_calibration', started)
+            started = perf_counter()
             rgba, _ = renderer.render_rgba_multiple(
                 [mesh for _, mesh, _ in hands], cam_t=[np.zeros(3) for _ in hands],
                 render_res=np.array([image.shape[1], image.shape[0]]),
                 is_right=[side == 'right' for side, _, _ in hands],
                 mesh_base_color=[COLOR_BLUE if side == 'right' else COLOR_GREEN for side, _, _ in hands],
                 camera_intrinsics=k,
+                **({'timings': timings} if timings is not None else {}),
             )
+            record_timing(timings, 'frame_renderer_total', started)
+            started = perf_counter()
             image = blend_rgba_overlay(image, rgba, mesh_alpha=mesh_alpha)
             for side, _, joints in hands:
                 keypoints = project_camera_joints(joints, k)
                 image = draw_openpose21_joints(image, keypoints, side=side)
+            record_timing(timings, 'frame_overlay', started)
+        started = perf_counter()
         if not cv2.imwrite(str(render_dir / f'{index:06d}.jpg'), image):
             raise OSError(f'Cannot write rendered frame {index}')
+        record_timing(timings, 'frame_jpeg_encode_write', started)
+        record_timing(timings, f'frame_total_{len(hands)}_hands', frame_started)
     report = {'source': str(path), 'fit_steps': steps, 'max_rmse_m': max_rmse_m,
               'mesh_alpha': mesh_alpha,
               'present_hands': len(diagnostics),
               'rendered_hands': sum(d['rendered'] for d in diagnostics), 'hands': diagnostics}
     (out_dir / 'parquet_mesh_fit.json').write_text(json.dumps(report, indent=2, allow_nan=False))
-    create_video_from_images(str(render_dir), str(out_dir / 'render.mp4'), fps=fps)
+    create_video_from_images(str(render_dir), str(out_dir / 'render.mp4'), fps=fps,
+                             **({'timings': timings} if timings is not None else {}))
     return report

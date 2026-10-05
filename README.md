@@ -4,6 +4,18 @@ For development and handoff, read [AGENTS.md](AGENTS.md),
 [PIPELINE_CONTRACT.md](PIPELINE_CONTRACT.md), and
 [PROJECT_MEMORY.md](PROJECT_MEMORY.md) (decisions, known risks, pending validation).
 
+## Isolated Render Profiling Experiment
+
+The hand-render worktree supports an optional `timings` dictionary on
+`render_tracking_parquet`, `Renderer.render_rgba_multiple`, and
+`create_video_from_images`. Omit it to retain the normal output contract.
+Aggregates are wall-clock counts/totals/min/max/first durations, not CUDA kernel
+times; nested totals must not be added together. No GPU synchronization is added.
+The independent replay launcher lives in the hand-opt orchestration repository
+at `docker/ray-env/run-render-replay.sh`. It reads final Parquet and regenerates
+the full render using unchanged fitting settings; it does not run MINT or HaMeR
+inference. No renderer reuse or Ray Actors have been introduced yet.
+
 ![EgoHandKit teaser](assets/teaser.gif)
 
 **EgoHandKit** is a toolkit for hand mesh recovery and world-space

@@ -144,7 +144,8 @@ def test_draw_openpose21_joints_marks_projected_joints():
 
 @pytest.mark.parametrize('error,rendered', [(0.001, 1), (0.04, 0), (float('nan'), 0)])
 @pytest.mark.parametrize('side', ['left', 'right'])
-def test_render_reads_only_parquet_presence_and_calibrated_camera(tmp_path, monkeypatch, error, rendered, side):
+@pytest.mark.parametrize('profile', [False, True])
+def test_render_reads_only_parquet_presence_and_calibrated_camera(tmp_path, monkeypatch, error, rendered, side, profile):
     frames = []
     for i in range(2):
         path = tmp_path / f'{i}.jpg'
@@ -169,7 +170,17 @@ def test_render_reads_only_parquet_presence_and_calibrated_camera(tmp_path, monk
     monkeypatch.setattr('bbox_utils.create_video_from_images', Mock())
     renderer = Mock()
     renderer.render_rgba_multiple.return_value = (np.zeros((40, 60, 4)), None)
-    report = render_tracking_parquet(parquet, frames, None, renderer, tmp_path / 'final', depth_dir=tmp_path)
+    timings = {} if profile else None
+    report = render_tracking_parquet(parquet, frames, None, renderer, tmp_path / 'final',
+                                     depth_dir=tmp_path, timings=timings)
+    if profile:
+        assert timings['frame_read_rgb']['count'] == 2
+        assert timings['frame_jpeg_encode_write']['count'] == 2
+        assert timings['mano_fit_batch']['count'] == 1
+        assert timings.get('frame_renderer_total', {}).get('count', 0) == rendered
+        assert all(item['total_s'] >= 0 for item in timings.values())
+    if rendered:
+        assert ('timings' in renderer.render_rgba_multiple.call_args.kwargs) == profile
     assert report['present_hands'] == 1
     assert report['rendered_hands'] == rendered
     assert fitter.call_args.args[2] == [side]

@@ -10,6 +10,8 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 import imageio
+from time import perf_counter
+from render_profiling import record_timing
 
 def compute_bbox_from_keypoints(keypoints, img_shape, scale_factor=1.0, max_size_ratio=0.4):
     """Compute tight bbox from keypoints. Scaling is applied later when creating HaMeR input patches."""
@@ -107,7 +109,7 @@ def enlarge_bbox(bbox, scale=1.2, img_shape=None):
     return np.array([new_x1, new_y1, new_x2, new_y2], dtype=np.float64 if not hasattr(bbox, 'dtype') else bbox.dtype)
 
 
-def create_video_from_images(image_folder, output_video_path, fps=30):
+def create_video_from_images(image_folder, output_video_path, fps=30, *, timings=None):
     """Create MP4 video from images in a folder using imageio (same as src_cam video)."""
     image_folder = Path(image_folder)
     if not image_folder.exists():
@@ -124,17 +126,21 @@ def create_video_from_images(image_folder, output_video_path, fps=30):
     
     # Load all images
     frames = []
+    started = perf_counter()
     for img_file in tqdm(image_files, desc=f"  Loading frames"):
         img = imageio.imread(str(img_file))
         if img is not None:
             frames.append(img)
     
+    record_timing(timings, 'video_load_jpegs', started)
     if len(frames) == 0:
         print(f"Warning: Could not load any images from {image_folder}")
         return
     
     # Write video using imageio (same method as src_cam video generation)
+    started = perf_counter()
     imageio.mimwrite(str(output_video_path), frames, fps=fps)
+    record_timing(timings, 'video_encode_write', started)
     print(f"  Video saved: {output_video_path} ({len(frames)} frames @ {fps} fps)")
 
 
