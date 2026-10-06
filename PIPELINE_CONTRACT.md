@@ -1,5 +1,37 @@
 # EgoHandKit Pipeline Contract
 
+## Isolated Renderer Lifecycle Experiment
+
+`Renderer.render_rgba_multiple(..., offscreen_renderer=None)` optionally borrows
+a caller-owned offscreen renderer. The caller must supply matching viewport
+dimensions and create/use/delete it in the same process and thread. Each call
+still builds a new scene; geometry, colors, camera, and fitting are unchanged.
+The default retains per-call creation/deletion. This hook is used only by the
+separate replay experiment, not by the production launcher.
+
+The optional synchronous `frame_writer` callback on `render_tracking_parquet`
+receives frame identity/image path, fitted hands, depth path, camera intrinsics,
+output directory, and mesh alpha. It writes exactly that frame and returns
+`frame_idx`, `output_path`, and `rendered_hands`; the caller validates the response
+and file existence before advancing. The default and experimental workers use
+the same `render_tracking_frame` helper. Empty-hand frames are still written.
+Failures abort before successful fit-report/video completion; partial JPEGs may
+remain in the isolated failed output and are not resumable results. This callback
+does not change fitting, frame order, thresholds, or Parquet contents.
+
+An alternative optional `frame_dispatcher` handles the complete fitted frame
+sequence, mutually exclusive with `frame_writer`. The isolated Ray implementation
+uses at most one outstanding request per owner (two total), permits out-of-order
+completion, and verifies each acknowledgement. The caller requires the completed
+frame count and exact JPEG filename set before encoding in frame-index order.
+Workers own independent EGL contexts; no raw image results return to the driver.
+Failures abort the isolated run; retries/resume and atomic publication are not
+part of this boundary. Production defaults still render locally.
+
+Do not interleave independent EGL renderer lifetimes in the same process:
+pyrender's context deletion calls `eglTerminate` and can invalidate a second
+live context. Each replay owner uses one context in its own process/thread.
+
 The visual frontend is the only component that knows how observations are
 obtained. It emits `egohand.observations.v1`: sequence metadata plus one frame
 record for every input image, with `hands`, bounding boxes, 21 keypoints,

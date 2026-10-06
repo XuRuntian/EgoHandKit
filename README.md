@@ -14,7 +14,23 @@ times; nested totals must not be added together. No GPU synchronization is added
 The independent replay launcher lives in the hand-opt orchestration repository
 at `docker/ray-env/run-render-replay.sh`. It reads final Parquet and regenerates
 the full render using unchanged fitting settings; it does not run MINT or HaMeR
-inference. No renderer reuse or Ray Actors have been introduced yet.
+inference. The isolated replay also supports local/Actor reuse via the optional
+`offscreen_renderer` argument to `Renderer.render_rgba_multiple`. The caller
+owns its context, fixed viewport dimensions, and cleanup. Omit it to keep the
+original per-call creation/deletion behavior; production entry points are
+unchanged and no Ray dependency is added to EgoHandKit.
+
+The optional `frame_writer` on `render_tracking_parquet` is a synchronous
+single-frame completion boundary for isolated replay. Its local and Ray
+implementations both use `render_tracking_frame` for identical image reading,
+drawing, overlay, and JPEG writing. The default calls that helper directly.
+Fitting and final video encoding remain in the caller. No production flags
+or selection thresholds change.
+
+The alternative `frame_dispatcher` hook lets the isolated orchestration replay
+use two process-owned renderers with bounded outstanding work. It validates the
+complete frame set before the unchanged video encoder. This is the current
+Ray experiment; no Ray code is imported by normal EgoHandKit entry points.
 
 ![EgoHandKit teaser](assets/teaser.gif)
 

@@ -347,13 +347,16 @@ class Renderer:
             is_right=None,
             camera_intrinsics=None,
             timings=None,
+            offscreen_renderer=None,
         ):
 
         started = perf_counter()
-        renderer = pyrender.OffscreenRenderer(viewport_width=render_res[0],
-                                              viewport_height=render_res[1],
-                                              point_size=1.0)
-        record_timing(timings, 'renderer_create', started)
+        renderer = offscreen_renderer
+        if renderer is None:
+            renderer = pyrender.OffscreenRenderer(viewport_width=render_res[0],
+                                                  viewport_height=render_res[1],
+                                                  point_size=1.0)
+            record_timing(timings, 'renderer_create', started)
         started = perf_counter()
         # material = pyrender.MetallicRoughnessMaterial(
         #     metallicFactor=0.0,
@@ -406,9 +409,10 @@ class Renderer:
         started = perf_counter()
         color = color.astype(np.float32) / 255.0
         record_timing(timings, 'renderer_color_convert', started)
-        started = perf_counter()
-        renderer.delete()
-        record_timing(timings, 'renderer_delete', started)
+        if offscreen_renderer is None:
+            started = perf_counter()
+            renderer.delete()
+            record_timing(timings, 'renderer_delete', started)
 
         return color, rend_depth.astype(np.float32)
 

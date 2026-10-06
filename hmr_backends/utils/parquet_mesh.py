@@ -162,13 +162,58 @@ def read_tracking(path):
     return {row['frame_idx']: row for row in rows}
 
 
+def render_tracking_frame(frame, hands, depth_path, intrinsic, renderer, render_dir,
+                          *, mesh_alpha=PARQUET_RENDER_MESH_ALPHA, timings=None):
+    """Read, draw and write one frame; return metadata, not image arrays."""
+    index = int(frame['frame_idx'])
+    frame_started = perf_counter()
+    started = perf_counter()
+    image = cv2.imread(str(frame['img_path']))
+    record_timing(timings, 'frame_read_rgb', started)
+    if image is None:
+        raise ValueError(f"Cannot read image: {frame['img_path']}")
+    if hands:
+        started = perf_counter()
+        depth = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED)
+        if depth is None:
+            raise ValueError(f'Cannot read depth dimensions for frame {index}')
+        k = scale_camera_intrinsics(intrinsic, depth.shape[:2], image.shape[:2])
+        record_timing(timings, 'frame_read_depth_and_calibration', started)
+        started = perf_counter()
+        rgba, _ = renderer.render_rgba_multiple(
+            [mesh for _, mesh, _ in hands], cam_t=[np.zeros(3) for _ in hands],
+            render_res=np.array([image.shape[1], image.shape[0]]),
+            is_right=[side == 'right' for side, _, _ in hands],
+            mesh_base_color=[COLOR_BLUE if side == 'right' else COLOR_GREEN for side, _, _ in hands],
+            camera_intrinsics=k,
+            **({'timings': timings} if timings is not None else {}),
+        )
+        record_timing(timings, 'frame_renderer_total', started)
+        started = perf_counter()
+        image = blend_rgba_overlay(image, rgba, mesh_alpha=mesh_alpha)
+        for side, _, joints in hands:
+            keypoints = project_camera_joints(joints, k)
+            image = draw_openpose21_joints(image, keypoints, side=side)
+        record_timing(timings, 'frame_overlay', started)
+    started = perf_counter()
+    output = Path(render_dir) / f'{index:06d}.jpg'
+    if not cv2.imwrite(str(output), image):
+        raise OSError(f'Cannot write rendered frame {index}')
+    record_timing(timings, 'frame_jpeg_encode_write', started)
+    record_timing(timings, f'frame_total_{len(hands)}_hands', frame_started)
+    return {'frame_idx': index, 'output_path': str(output), 'rendered_hands': len(hands)}
+
+
 def render_tracking_parquet(path, frames, mano, renderer, out_dir, *, depth_dir,
                             expected_reference_camera=None, fps=30, steps=200,
                             max_rmse_m=0.03, batch_size=64,
-                            mesh_alpha=PARQUET_RENDER_MESH_ALPHA, timings=None):
+                            mesh_alpha=PARQUET_RENDER_MESH_ALPHA, timings=None,
+                            frame_writer=None, frame_dispatcher=None):
     """Render Parquet geometry only; frames supply image paths, never hand data."""
     from bbox_utils import create_video_from_images
 
+    if frame_writer is not None and frame_dispatcher is not None:
+        raise ValueError('Choose a frame writer or dispatcher, not both')
     if steps < 1 or batch_size < 1 or not np.isfinite(max_rmse_m) or max_rmse_m <= 0:
         raise ValueError('Invalid MANO fitting settings')
     rows = read_tracking(path)
@@ -225,43 +270,32 @@ def render_tracking_parquet(path, frames, mano, renderer, out_dir, *, depth_dir,
     render_dir.mkdir(parents=True, exist_ok=True)
     for old_frame in render_dir.glob('[0-9][0-9][0-9][0-9][0-9][0-9].jpg'):
         old_frame.unlink()
-    for frame in frames:
+    if frame_dispatcher is not None:
+        started = perf_counter()
+        completion = frame_dispatcher(frames, meshes, depth_paths, intrinsic, render_dir,
+                                      mesh_alpha=mesh_alpha)
+        expected_names = {f'{int(frame["frame_idx"]):06d}.jpg' for frame in frames}
+        if (completion.get('completed_frames') != len(frames) or
+                {p.name for p in render_dir.glob('*.jpg')} != expected_names):
+            raise RuntimeError('Incomplete dispatched frame sequence')
+        record_timing(timings, 'frame_dispatch_total', started)
+    for frame in frames if frame_dispatcher is None else []:
         index = int(frame['frame_idx'])
-        frame_started = perf_counter()
-        started = perf_counter()
-        image = cv2.imread(str(frame['img_path']))
-        record_timing(timings, 'frame_read_rgb', started)
-        if image is None:
-            raise ValueError(f"Cannot read image: {frame['img_path']}")
         hands = meshes.get(index, [])
-        if hands:
-            started = perf_counter()
-            depth = cv2.imread(str(depth_paths[index]), cv2.IMREAD_UNCHANGED)
-            if depth is None:
-                raise ValueError(f'Cannot read depth dimensions for frame {index}')
-            k = scale_camera_intrinsics(intrinsic, depth.shape[:2], image.shape[:2])
-            record_timing(timings, 'frame_read_depth_and_calibration', started)
-            started = perf_counter()
-            rgba, _ = renderer.render_rgba_multiple(
-                [mesh for _, mesh, _ in hands], cam_t=[np.zeros(3) for _ in hands],
-                render_res=np.array([image.shape[1], image.shape[0]]),
-                is_right=[side == 'right' for side, _, _ in hands],
-                mesh_base_color=[COLOR_BLUE if side == 'right' else COLOR_GREEN for side, _, _ in hands],
-                camera_intrinsics=k,
-                **({'timings': timings} if timings is not None else {}),
+        if frame_writer is None:
+            render_tracking_frame(
+                frame, hands, depth_paths[index] if hands else None, intrinsic,
+                renderer, render_dir, mesh_alpha=mesh_alpha, timings=timings,
             )
-            record_timing(timings, 'frame_renderer_total', started)
+        else:
             started = perf_counter()
-            image = blend_rgba_overlay(image, rgba, mesh_alpha=mesh_alpha)
-            for side, _, joints in hands:
-                keypoints = project_camera_joints(joints, k)
-                image = draw_openpose21_joints(image, keypoints, side=side)
-            record_timing(timings, 'frame_overlay', started)
-        started = perf_counter()
-        if not cv2.imwrite(str(render_dir / f'{index:06d}.jpg'), image):
-            raise OSError(f'Cannot write rendered frame {index}')
-        record_timing(timings, 'frame_jpeg_encode_write', started)
-        record_timing(timings, f'frame_total_{len(hands)}_hands', frame_started)
+            ack = frame_writer(frame, hands, depth_paths[index] if hands else None,
+                               intrinsic, render_dir, mesh_alpha=mesh_alpha)
+            expected_path = render_dir / f'{index:06d}.jpg'
+            if ack != {'frame_idx': index, 'output_path': str(expected_path),
+                       'rendered_hands': len(hands)} or not expected_path.is_file():
+                raise RuntimeError(f'Invalid frame completion: {index}')
+            record_timing(timings, 'frame_writer_round_trip', started)
     report = {'source': str(path), 'fit_steps': steps, 'max_rmse_m': max_rmse_m,
               'mesh_alpha': mesh_alpha,
               'present_hands': len(diagnostics),

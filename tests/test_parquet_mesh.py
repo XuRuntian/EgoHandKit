@@ -145,7 +145,8 @@ def test_draw_openpose21_joints_marks_projected_joints():
 @pytest.mark.parametrize('error,rendered', [(0.001, 1), (0.04, 0), (float('nan'), 0)])
 @pytest.mark.parametrize('side', ['left', 'right'])
 @pytest.mark.parametrize('profile', [False, True])
-def test_render_reads_only_parquet_presence_and_calibrated_camera(tmp_path, monkeypatch, error, rendered, side, profile):
+@pytest.mark.parametrize('execution', ['direct', 'writer', 'dispatcher'])
+def test_render_reads_only_parquet_presence_and_calibrated_camera(tmp_path, monkeypatch, error, rendered, side, profile, execution):
     frames = []
     for i in range(2):
         path = tmp_path / f'{i}.jpg'
@@ -171,8 +172,19 @@ def test_render_reads_only_parquet_presence_and_calibrated_camera(tmp_path, monk
     renderer = Mock()
     renderer.render_rgba_multiple.return_value = (np.zeros((40, 60, 4)), None)
     timings = {} if profile else None
+    def writer(frame, hands, depth_path, intrinsic, render_dir, **kwargs):
+        return _PARQUET_MESH.render_tracking_frame(
+            frame, hands, depth_path, intrinsic, renderer, render_dir,
+            timings=timings, **kwargs)
+    def dispatch(frames, meshes, depths, intrinsic, render_dir, **kwargs):
+        for frame in reversed(frames):
+            i = frame['frame_idx']
+            writer(frame, meshes.get(i, []), depths[i], intrinsic, render_dir, **kwargs)
+        return {'completed_frames': len(frames)}
     report = render_tracking_parquet(parquet, frames, None, renderer, tmp_path / 'final',
-                                     depth_dir=tmp_path, timings=timings)
+                                     depth_dir=tmp_path, timings=timings,
+                                     frame_writer=writer if execution == 'writer' else None,
+                                     frame_dispatcher=dispatch if execution == 'dispatcher' else None)
     if profile:
         assert timings['frame_read_rgb']['count'] == 2
         assert timings['frame_jpeg_encode_write']['count'] == 2
@@ -230,3 +242,41 @@ def test_render_tracking_parquet_draws_semitransparent_mesh_and_final_joints(tmp
     rendered = cv2.imread(str(tmp_path / 'final/parquet_render_frames/000000.jpg'))
     assert 40 <= int(rendered[5, 5, 2]) <= 80
     assert int(rendered[20, 20].sum()) > int(rendered[5, 5].sum())
+
+
+def test_frame_write_failure_is_not_acknowledged(tmp_path, monkeypatch):
+    path = tmp_path / 'source.jpg'
+    assert cv2.imwrite(str(path), np.zeros((32, 32, 3), np.uint8))
+    monkeypatch.setattr(_PARQUET_MESH.cv2, 'imwrite', lambda *a: False)
+    with pytest.raises(OSError, match='Cannot write rendered frame'):
+        _PARQUET_MESH.render_tracking_frame(
+            {'frame_idx': 0, 'img_path': str(path)}, [], None, None, Mock(), tmp_path)
+
+
+def test_invalid_writer_ack_does_not_encode_video(tmp_path, monkeypatch):
+    parquet = _write_tracking_parquet(tmp_path / 'tracking.parquet', [_tracking_row(0)])
+    monkeypatch.setattr(_PARQUET_MESH, 'resolve_depth_camera_intrinsics',
+                        lambda *a, **kw: (np.eye(3), None))
+    monkeypatch.setattr(_PARQUET_MESH, 'resolve_depth_frames', lambda *a: [None])
+    encoder = Mock()
+    monkeypatch.setattr('bbox_utils.create_video_from_images', encoder)
+    with pytest.raises(RuntimeError, match='Invalid frame completion'):
+        render_tracking_parquet(
+            parquet, [{'frame_idx': 0, 'img_path': 'not-read-by-driver'}], None, Mock(),
+            tmp_path / 'final', depth_dir=tmp_path, frame_writer=lambda *a, **kw: {})
+    encoder.assert_not_called()
+
+
+def test_incomplete_dispatch_does_not_encode_video(tmp_path, monkeypatch):
+    parquet = _write_tracking_parquet(tmp_path / 'tracking.parquet', [_tracking_row(0)])
+    monkeypatch.setattr(_PARQUET_MESH, 'resolve_depth_camera_intrinsics',
+                        lambda *a, **kw: (np.eye(3), None))
+    monkeypatch.setattr(_PARQUET_MESH, 'resolve_depth_frames', lambda *a: [None])
+    encoder = Mock()
+    monkeypatch.setattr('bbox_utils.create_video_from_images', encoder)
+    with pytest.raises(RuntimeError, match='Incomplete dispatched frame sequence'):
+        render_tracking_parquet(
+            parquet, [{'frame_idx': 0, 'img_path': 'unused'}], None, Mock(),
+            tmp_path / 'final', depth_dir=tmp_path,
+            frame_dispatcher=lambda *a, **kw: {'completed_frames': 1})
+    encoder.assert_not_called()

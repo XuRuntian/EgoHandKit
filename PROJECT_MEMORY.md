@@ -165,3 +165,127 @@ No Actor or renderer lifetime changes yet. Deletion remains about 212 s across
 1906 calls. Future reuse/Actor comparisons must keep the EGL backend constant;
 do not attribute this environment fix's benefit to Ray. Full MINT/HaMeR inference
 was not rerun for this comparison, so its end-to-end speedup is not measured.
+
+## Renderer Reuse Prototype (2026-10-05)
+
+Supersedes the pending lifecycle implementation above: an optional caller-owned
+`offscreen_renderer` now permits the orchestration replay to compare per-frame,
+local reuse, and single Ray Actor reuse. Production defaults remain unchanged.
+The Actor lives in the orchestration repository, not EgoHandKit; it owns one EGL
+context, accepts one frame at a time, and rebuilds the scene on each call.
+
+Validation: four synthetic 64x64 renders (including empty geometry, changed
+geometry/handedness, and returning to the first frame) matched per-frame color
+and depth arrays exactly for local and Actor reuse. Each reused owner created
+and deleted once. Evidence: orchestration repo
+`tmp/ray-render/actor_lifecycle_20261005_2/actor_smoke.json`.
+This is not real-hand visual acceptance, a long-run memory test, or evidence of
+speedup. Full replay and failure recovery beyond explicit cleanup remain unverified.
+
+## Full Reuse Replay Results (2026-10-05)
+
+The full-replay pending item above is now measured once per mode, sequentially
+under the same NVIDIA EGL image `40aca6e01bda`, with unchanged lifecycle code
+throughout. Per-frame/local/Actor replay wall times excluding verification and
+Ray shutdown: 600.514 / 268.975 / 299.415 seconds. Render pipeline wall times:
+582.410 / 250.704 / 278.936 seconds. All 2137 frames and 3095 rendered hands
+retained, fit diagnostics equal to the original reference, and all three videos
+fully decoded to 2137 frames at 30 FPS. Local and Actor each created/deleted once
+for 1906 rendering calls. No algorithm or production-default changes.
+
+Reuse is the effective optimization; Actor adds overhead relative to local reuse.
+The Actor benefit versus baseline is not evidence Ray is faster than ordinary
+Python resource reuse. Renderer-call totals: 339.375 / 37.099 / 64.674 seconds.
+JPEG reload also varied by 33 seconds, so total gains are not purely lifecycle.
+One trial each, uncontrolled OS cache, desktop GPU interference possible.
+
+Strict quality mismatch is retained: same-GPU per-frame/local differs at 64,821
+pixel positions (801 frames, max channel delta 8), local/Actor at 3,675 positions
+(47 frames, max 6), out of 4,308,192,000 positions. Selected worst-mean-error crops
+showed no visible displacement; the cause of small differences is not isolated.
+No pixel threshold was relaxed and this is not exhaustive visual acceptance.
+
+Output roots in `/home/user/ego_data/hand_opt_runs/`:
+`actor_validation_per_frame_20261005`, `actor_validation_local_20261005`,
+`actor_validation_actor_20261005`. Resource samples show approximately stable RSS
+during rendering and growth during the preexisting whole-video JPEG loading.
+Peak summed tree RSS: 15.362 / 15.402 / 17.182 GiB (shared pages may double count).
+Orchestration `docker/ray-env/README.md` records complete boundaries and evidence.
+Keep local reuse as simplest performance candidate and Actor as learning variant;
+production promotion and further Actor work await review. No commit yet.
+
+## Whole-Frame Actor Review Candidate (2026-10-05)
+
+Extracted the existing frame body to `render_tracking_frame` without changing
+its operations, parameters or ordering. Optional synchronous `frame_writer`
+lets the isolated worker own RGB/depth reads, rendering, overlay and JPEG write;
+the caller validates a small frame-completion result. Default uses the same
+helper directly. Fitting and video encoding stay in the driver. No production
+entry-point changes or Ray dependency in this repository.
+
+Full same-code controls under the same image: `local-frame` replay 261.162 s,
+`actor-frame` 299.994 s (excluding verification/shutdown). Both 2137 written
+frames, 3095 hands, 1906 render calls, one create/delete, original fit report
+equal. Both encoded videos fully decode to 2137 frames/30 FPS/1920x1056.
+Pixel comparison new local/Actor: 44 changed frames, max channel delta 5/255,
+mean absolute delta 6.223e-7 (0-255 units). Previous local/new local: 52 changed
+frames, max 6/255. Strict mismatch is retained, not silently accepted as equal.
+
+Moving whole-frame work removed large RGBA/depth return values but did not
+improve the previous Actor's 299.415 s. This negative result is recorded; do not
+claim new speedup or blame the entire difference on communication. Internal
+Actor overlay/draw/read timings are also slower; cause remains unverified.
+New output roots: `frame_actor_local_20261005` / `frame_actor_remote_20261005`
+under `/home/user/ego_data/hand_opt_runs/`. No core edits during the paired runs.
+
+35 focused tests passed, one asset-dependent skip. Five orchestration ownership
+tests and real GPU synthetic JPEG/error tests passed. A test initially failed
+when it interleaved independent EGL lifetimes in one process: pyrender's
+`delete_context` calls `eglTerminate`, invalidating the other live renderer.
+Baseline is now drawn before the reusable context is created; real replay owns
+one renderer per process. Evidence and review order are in orchestration README.
+Keep this version for review; no queue/pool/production promotion yet. Hard-crash
+resume and atomic publication remain out of scope. Failed isolated outputs may
+contain partial JPEGs and must not be used as successful results.
+
+## Bounded Two-Actor Candidate (2026-10-06)
+
+Current review candidate: orchestration `FrameActorPool` with two independent
+EGL owners and at most one request per owner. Optional `frame_dispatcher` in
+`render_tracking_parquet` dispatches after unchanged MANO fitting, validates the
+completed count/exact JPEG names, then runs the unchanged encoder. Per-worker
+frame IDs increase but may have gaps; completion can be out of order. No normal
+entry-point changes, new EgoHandKit dependencies, or algorithm changes.
+
+Five full sequential replays on the same code/image, order pool2 A, local A,
+pool2 B, local B, pool1. Replay wall seconds excluding verification/shutdown:
+pool2 189.790 / 185.772; local 240.030 / 237.288; pool1 275.068. Local mean
+238.659 versus pool2 mean 187.781: 21.3% reduction, 1.271x throughput. The old
+261-second result is not the contemporary baseline. Frame stage: local about
+158.7 s, pool1 195.1 s, pool2 104.2-105.3 s; video loading+encoding similar.
+This is useful concurrency managed by Ray, not proof Python multiprocessing
+could not match it, nor a complete MINT/HaMeR pipeline speedup.
+
+All five retain 2137 frames / 3095 rendered hands and equal fit diagnostics;
+videos fully decode at 30 FPS / 1920x1056. Two-Actor runs have 2137 successful
+acks, peak in-flight=2, total render calls=1906, one create/delete per worker.
+Same-GPU pair A comparison: 79 changed frames, 5,436 changed pixel positions,
+max channel difference 6/255 (3 pixels above 5). Pair B: 64 changed frames,
+max 6/255. Selected worst crops showed no obvious shift, not exhaustive visual
+acceptance. Strict mismatch statuses retained, no relaxed quality thresholds.
+
+Peak sampled summed RSS: pool 17.49/17.46 GiB versus local 15.40/15.33 GiB;
+shared pages can double count. Device-wide VRAM peaks pool 6282/6219 MiB versus
+local 6122/6124 MiB. No sampling errors. Desktop graphics and uncontrolled OS
+cache remain limitations; two repeats do not establish confidence intervals.
+Tests: 48 focused EgoHandKit passed, one asset-dependent skip; eight orchestration
+unit tests plus real GPU pool/pixel/failure smoke passed, including deliberate
+worker death and cleanup. Whole-video mesh/JPEG buffers remain O(video length).
+
+Artifacts: `/home/user/ego_data/hand_opt_runs/{pool2_a_20261006,pool_control_a_20261006,
+pool2_b_20261006,pool_control_b_20261006,pool1_control_20261006}`. Smoke evidence:
+orchestration `tmp/ray-render/pool_failure_smoke_20261006/actor_smoke.json`.
+The user approved committing this candidate on 2026-10-06. Keep it frozen for
+review; no further worker growth, Ray Data rewrite or production promotion.
+Hard-crash resume/atomic publication,
+other videos and multi-GPU behavior remain out of scope.
