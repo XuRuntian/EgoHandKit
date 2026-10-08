@@ -1,5 +1,14 @@
 # EgoHandKit Pipeline Contract
 
+## Native Shell Configuration
+
+`run_without_front.sh` allows source-root and Python overrides. Explicit
+`EGOHANDKIT_PYTHON` skips Conda activation; otherwise previous defaults apply.
+The script still owns algorithm arguments, canonical export and output paths.
+Missing exporter copies may be created, but different existing copies are never
+silently overwritten. Existing test_data caches are not isolated by this patch;
+callers must serialize access. No Ray behavior is added.
+
 The visual frontend is the only component that knows how observations are
 obtained. It emits `egohand.observations.v1`: sequence metadata plus one frame
 record for every input image, with `hands`, bounding boxes, 21 keypoints,

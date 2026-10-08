@@ -1,5 +1,15 @@
 # EgoHandKit
 
+## Native Launcher Configuration
+
+`scripts/run_without_front.sh` accepts `EGOHANDKIT_ROOT`, `MINT_ROOT` and
+`CONDA_ENV` environment overrides with the previous defaults. An absolute
+`EGOHANDKIT_PYTHON` executable bypasses Conda activation; otherwise the original
+activation remains. Algorithm arguments/output layout are unchanged. A missing
+MINT exporter is copied, but an existing different exporter now causes an error
+rather than being overwritten. Resolve differences explicitly. This does not
+provision weights, dependencies or GPU/EGL settings.
+
 For development and handoff, read [AGENTS.md](AGENTS.md),
 [PIPELINE_CONTRACT.md](PIPELINE_CONTRACT.md), and
 [PROJECT_MEMORY.md](PROJECT_MEMORY.md) (decisions, known risks, pending validation).

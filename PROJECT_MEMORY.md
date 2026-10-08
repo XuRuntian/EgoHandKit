@@ -1,5 +1,18 @@
 # EgoHandKit Project Memory
 
+## Native Launcher Patch (2026-10-08)
+
+Isolated branch feat/native-hand-launcher starts from feature/mint-frontend
+34b3b1c, not perf/hand-render. Only the shell entrypoint is adapted: configurable
+source paths and optional absolute Python instead of Conda activation; differing
+existing MINT exporters are rejected instead of overwritten. Missing exporters
+are still copied. All algorithm flags and output layout remain unchanged.
+The companion native-hand main-project launcher chains MINT and this script,
+retains all outputs, and serializes its own runs per checkout. Existing caches
+and legacy manual commands remain a concurrency limitation. CPU fake-interpreter
+tests cover two commands, paths with spaces and exporter non-overwrite. No native
+GPU quality/performance validation or environment installation has been done.
+
 Last updated: 2026-09-21.
 
 ## Authority and Snapshot
