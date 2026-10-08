@@ -289,3 +289,37 @@ The user approved committing this candidate on 2026-10-06. Keep it frozen for
 review; no further worker growth, Ray Data rewrite or production promotion.
 Hard-crash resume/atomic publication,
 other videos and multi-GPU behavior remain out of scope.
+
+## Opt-In Full-Pipeline Integration (2026-10-08)
+
+User requested complete timing and configurable Actor count after four-Actor
+replay showed a benefit. Added `--render_actor_workers {0,1,2,4}`, default 0,
+with a narrow optional call to the orchestration `render_actor` adapter from
+`_render_results`. No Ray dependency is required in default mode. The adapter
+starts/shuts down Ray around final rendering and keeps one frame per worker
+in flight. It does not change HaMeR, gates, depth anchoring or smoothing.
+
+Full same-image sequential runs on the existing shelf session, orchestration
+artifacts `/home/user/ego_data/hand_opt_runs/`:
+`full_actor0_retry_20261008`: total launcher 1777.519 s, MINT 391.799 s,
+export 1.604 s, EgoHandKit 1382.953 s.
+`full_actor4_20261008`: total 1197.796 s, MINT 393.677 s,
+export 1.654 s, EgoHandKit 801.027 s. End-to-end reduction 32.61%, 1.484x
+throughput on this pair, not a general batch-throughput guarantee.
+The candidate combines persistent renderer reuse and four-way dispatch;
+this is not attribution of the whole gain to Ray's scheduler alone.
+
+Both deliver 2137 frames; Parquet schema and every column agree, with NaNs
+treated as equal for missing joints. Both 3D joint arrays have zero difference,
+presence/source masks match, and MANO diagnostics match (3095 rendered hands).
+Strict JPEG/visual acceptance is separate; see orchestration experiment report.
+Only one successful full pair, uncontrolled caches and desktop interference.
+Initial control `full_actor0_20261008` failed before rendering on a PNG CRC
+read error at depth frame 539. No data or error checks were changed. Host CRC
+validation, 100 same-container reads and all 2137 depth-image reads subsequently
+passed, followed by successful full runs. Root cause is not isolated; failed
+attempt remains recorded and is excluded from successful timing comparisons.
+
+New targeted tests cover CLI opt-in, missing adapter/dependencies and unsupported
+counts. Defaults remain unchanged; no automatic promotion, distributed-node
+support, retry/resume, or VIO changes. All changes remain pending user review.

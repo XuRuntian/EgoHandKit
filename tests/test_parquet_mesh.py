@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import importlib.util
 
 import cv2
@@ -61,6 +61,7 @@ def test_parquet_render_cli_independent_and_enables_export():
     parser = build_arg_parser()
     defaults = parser.parse_args(['--input', 'unused'])
     assert not defaults.render_hand_tracking_parquet
+    assert defaults.render_actor_workers == 0
     args = parser.parse_args(['--input', 'unused', '--depth_dir', 'depth',
                               '--render_hand_tracking_parquet'])
     validate_cli_args(parser, args)
@@ -69,6 +70,24 @@ def test_parquet_render_cli_independent_and_enables_export():
     args.render_frontend_fallback = True
     with pytest.raises(SystemExit):
         validate_cli_args(parser, args)
+
+
+def test_actor_render_cli_is_opt_in_and_requires_adapter():
+    pytest.importorskip('pyrender')
+    from run import build_arg_parser, validate_cli_args
+    parser = build_arg_parser()
+    args = parser.parse_args(['--input', 'unused', '--depth_dir', 'depth',
+                              '--backend', 'hamer', '--render_hand_tracking_parquet',
+                              '--render_actor_workers', '4'])
+    with patch('importlib.util.find_spec', return_value=object()):
+        validate_cli_args(parser, args)
+    with patch('importlib.util.find_spec', return_value=None), pytest.raises(SystemExit):
+        validate_cli_args(parser, args)
+    args.render_hand_tracking_parquet = False
+    with pytest.raises(SystemExit):
+        validate_cli_args(parser, args)
+    with pytest.raises(SystemExit):
+        parser.parse_args(['--input', 'unused', '--render_actor_workers', '8'])
 
 
 @pytest.fixture

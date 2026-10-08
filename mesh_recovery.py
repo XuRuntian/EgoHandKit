@@ -359,6 +359,12 @@ def _render_results(raw_outputs, cleaned_data, renderer, args, out_dir, fps, lef
         return
     if getattr(args, 'render_hand_tracking_parquet', False):
         from hmr_backends.utils.parquet_mesh import render_tracking_parquet
+        render_options = {}
+        if getattr(args, 'render_actor_workers', 0):
+            from render_actor import render_tracking_parquet_with_actors
+            render_tracking_parquet = render_tracking_parquet_with_actors
+            render_options = {'actor_workers': args.render_actor_workers,
+                              'model_cfg': backend_bundle.model_cfg}
         report = render_tracking_parquet(
             Path(out_dir) / 'final' / 'hand_tracking.parquet', cleaned_data,
             backend_bundle.model.mano, renderer, Path(out_dir) / 'final',
@@ -366,6 +372,7 @@ def _render_results(raw_outputs, cleaned_data, renderer, args, out_dir, fps, lef
             expected_reference_camera=infer_camera_side(getattr(args, 'input', None)),
             fps=fps, steps=args.parquet_mano_fit_steps,
             max_rmse_m=args.parquet_mano_fit_max_rmse_m,
+            **render_options,
         )
         print(f"Parquet MANO render: {report['rendered_hands']}/{report['present_hands']} hands")
         return

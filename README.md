@@ -30,7 +30,26 @@ or selection thresholds change.
 The alternative `frame_dispatcher` hook lets the isolated orchestration replay
 use two process-owned renderers with bounded outstanding work. It validates the
 complete frame set before the unchanged video encoder. This is the current
-Ray experiment; no Ray code is imported by normal EgoHandKit entry points.
+Ray experiment; no Ray code is imported by default EgoHandKit entry points.
+
+### Optional Full-Pipeline Actor Rendering
+
+`run.py --render_actor_workers 1|2|4` enables the external orchestration adapter
+for final Parquet rendering, with HaMeR and `--render_hand_tracking_parquet`.
+Default `0` preserves the original renderer and needs no Ray installation.
+Nonzero values require Ray and `docker/ray-env/render_actor.py` from the hand-opt
+orchestration repository on `PYTHONPATH`; CLI validation fails if unavailable.
+The orchestrator's `HAND_RENDER_ACTORS` supplies this option. Use its existing
+`roboego-ray-env:2.58.0-render` image and full-pipeline entrypoint, not the CPU
+lesson image. See that repository's Ray README for the complete command.
+
+Only rendering is dispatched. Canonical ingestion, inference, gates, smoothing,
+Parquet export, MANO fitting settings and final video encoding are unchanged.
+Ray starts after inference, one frame per Actor remains in flight, and workers
+are closed and killed before shutdown. No automatic retry/resume is provided.
+`final/render_actor_profile.json` records timings and owner counts; retain debug
+outputs to retain this diagnostic when using the documented delivery wrapper.
+Actor counts above four and multi-node execution are not validated.
 
 ![EgoHandKit teaser](assets/teaser.gif)
 

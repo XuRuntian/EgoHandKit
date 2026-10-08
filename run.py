@@ -256,6 +256,8 @@ def build_arg_parser():
     parser.add_argument('--render_hand_tracking_parquet', action='store_true', default=False,
                         help='Fit and render MANO meshes using only final Parquet joints; enables Parquet export')
     parser.add_argument('--parquet_mano_fit_steps', type=int, default=200)
+    parser.add_argument('--render_actor_workers', type=int, choices=(0, 1, 2, 4), default=0,
+                        help='Optional external Ray render adapter: 0 keeps original rendering')
     parser.add_argument('--parquet_mano_fit_max_rmse_m', type=float, default=0.03)
     parser.add_argument('--force_detect', action='store_true', default=False,
                         help='Force re-run Pass 1/2 even if cached results exist')
@@ -316,6 +318,12 @@ def validate_cli_args(parser, args):
         parser.error('--mint_depth_wrist_only and --mint_depth_sensor_anchor are mutually exclusive')
     if args.render_hand_tracking_parquet or args.final_joints_smoother:
         args.hand_tracking_parquet = True
+    if args.render_actor_workers:
+        if not args.render or not args.render_hand_tracking_parquet or args.backend != 'hamer':
+            parser.error('--render_actor_workers requires HaMeR and Parquet rendering')
+        import importlib.util
+        if any(importlib.util.find_spec(name) is None for name in ('ray', 'render_actor')):
+            parser.error('--render_actor_workers requires Ray and the orchestration render_actor adapter on PYTHONPATH')
     if args.hmr_partial_hand_recovery:
         args.hand_tracking_parquet = True
         if args.frontend != 'canonical' or not args.mint_depth_sensor_anchor:

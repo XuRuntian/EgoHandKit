@@ -6,8 +6,8 @@
 a caller-owned offscreen renderer. The caller must supply matching viewport
 dimensions and create/use/delete it in the same process and thread. Each call
 still builds a new scene; geometry, colors, camera, and fitting are unchanged.
-The default retains per-call creation/deletion. This hook is used only by the
-separate replay experiment, not by the production launcher.
+The default retains per-call creation/deletion. Replay and the optional
+full-pipeline Actor adapter use this hook; the default launcher is unchanged.
 
 The optional synchronous `frame_writer` callback on `render_tracking_parquet`
 receives frame identity/image path, fitted hands, depth path, camera intrinsics,
@@ -21,12 +21,22 @@ does not change fitting, frame order, thresholds, or Parquet contents.
 
 An alternative optional `frame_dispatcher` handles the complete fitted frame
 sequence, mutually exclusive with `frame_writer`. The isolated Ray implementation
-uses at most one outstanding request per owner (two total), permits out-of-order
+uses at most one outstanding request per owner (1, 2, or 4 total), permits out-of-order
 completion, and verifies each acknowledgement. The caller requires the completed
 frame count and exact JPEG filename set before encoding in frame-index order.
 Workers own independent EGL contexts; no raw image results return to the driver.
 Failures abort the isolated run; retries/resume and atomic publication are not
 part of this boundary. Production defaults still render locally.
+
+`--render_actor_workers` defaults to 0. Nonzero values require HaMeR and Parquet
+rendering, Ray, and the external orchestration `render_actor` module on
+`PYTHONPATH`. The adapter owns a local Ray runtime only during final rendering
+and refuses to take over an existing runtime. It resolves RGB paths in the
+driver, uses the unchanged fitting function with `frame_dispatcher`, then
+closes workers and shuts down Ray, propagating errors. It writes
+`final/render_actor_profile.json`; successful dispatch does not imply pixel
+identity or visual acceptance. Fractional GPU reservations are scheduling
+resources, not memory isolation. No algorithm parameters or output schemas change.
 
 Do not interleave independent EGL renderer lifetimes in the same process:
 pyrender's context deletion calls `eglTerminate` and can invalidate a second
