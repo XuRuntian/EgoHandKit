@@ -1,5 +1,17 @@
 # EgoHandKit Pipeline Contract
 
+## Archived Depth Boundary
+
+The `run.py` entrypoint prepares supported FFV1 archives once before downstream
+depth consumers, retaining uint16 millimeter values and zero invalid pixels.
+Archive frame indices must be contiguous from zero and counts must match input
+images. Stream dimensions/format and decoded PNG headers/count are validated.
+Old absolute paths in metadata are not followed; inputs are resolved locally.
+Original archives/calibration are unchanged. Existing PNG behavior is unchanged.
+Temporary PNGs and copied calibration live until all pipeline stages finish and
+are then removed, including on exceptions and handled termination. Direct callers
+of low-level PNG helpers must use `prepared_depth` explicitly for archives.
+
 ## Native Shell Configuration
 
 `run_without_front.sh` allows source-root and Python overrides. Explicit

@@ -1,5 +1,17 @@
 # EgoHandKit
 
+## Archived Depth Input
+
+`--depth_dir` also accepts `depth_archive_v1` lossless FFV1 uint16 millimeter
+archives (`depth_uint16_ffv1.avi` or `depth_ffv1.mkv`) alongside archive metadata
+and `fast_foundation_stereo_video_meta.json`. Existing PNG directories take
+precedence. The pipeline decodes to a unique temporary directory under its output,
+shares it across depth stages and final rendering, and removes it on completion,
+exceptions, Ctrl-C or SIGTERM. No additional permanent artifact is produced;
+preparation duration goes to the existing console/log. FFmpeg and ffprobe must be
+on PATH. HEVC12/preview videos are not substitutes. Temporary disk space is needed;
+SIGKILL or a machine crash can leave temporary files behind.
+
 ## Native Launcher Configuration
 
 `scripts/run_without_front.sh` accepts `EGOHANDKIT_ROOT`, `MINT_ROOT` and

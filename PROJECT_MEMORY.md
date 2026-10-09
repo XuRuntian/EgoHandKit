@@ -1,5 +1,16 @@
 # EgoHandKit Project Memory
 
+## FFV1 Depth Compatibility (2026-10-09)
+
+Server evidence: depth_archive_v1 output deleted source PNGs and retained lossless
+gray16le FFV1 with millimeter units and zero invalid values. PNG-only depth loading
+therefore failed before backend inference. Compatibility now belongs to EgoHandKit
+run.py, not the external orchestration launcher. Preparation uses temporary PNGs
+and existing logs only; PNG inputs and algorithm parameters remain unchanged.
+Focused CPU tests cover uint16 round-trip, invalid metadata, damaged archives,
+frame mismatch and cleanup. Actual server archive/GPU pipeline remains unverified.
+SIGKILL/machine failure cannot guarantee cleanup; decoded data needs disk space.
+
 ## Native Launcher Patch (2026-10-08)
 
 Isolated branch feat/native-hand-launcher starts from feature/mint-frontend
