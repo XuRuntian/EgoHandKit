@@ -42,6 +42,29 @@ Do not interleave independent EGL renderer lifetimes in the same process:
 pyrender's context deletion calls `eglTerminate` and can invalidate a second
 live context. Each replay owner uses one context in its own process/thread.
 
+## Archived Depth Boundary
+
+The `run.py` entrypoint prepares supported FFV1 archives once before downstream
+depth consumers, retaining uint16 millimeter values and zero invalid pixels.
+Archive frame indices must be contiguous from zero and counts must match input
+images. Stream dimensions/format and decoded PNG headers/count are validated.
+Old absolute paths in metadata are not followed; inputs are resolved locally.
+Original archives/calibration are unchanged. Existing PNG behavior is unchanged.
+Temporary PNGs and copied calibration live until all pipeline stages finish and
+are then removed, including on exceptions and handled termination. Direct callers
+of low-level PNG helpers must use `prepared_depth` explicitly for archives.
+
+## Native Shell Configuration
+
+`run_without_front.sh` allows source-root and Python overrides. Explicit
+`EGOHANDKIT_PYTHON` skips Conda activation; otherwise previous defaults apply.
+The script still owns algorithm arguments, canonical export and output paths.
+Missing exporter copies may be created, but different existing copies are never
+silently overwritten. Existing test_data caches are not isolated by this patch;
+callers must serialize access. Appended `--render_actor_workers` is forwarded
+unchanged; omitting it keeps the original rendering path. Prepared FFV1 depth
+PNGs remain alive until final rendering, Actor cleanup and encoding finish.
+
 The visual frontend is the only component that knows how observations are
 obtained. It emits `egohand.observations.v1`: sequence metadata plus one frame
 record for every input image, with `hands`, bounding boxes, 21 keypoints,

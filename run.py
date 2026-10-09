@@ -22,6 +22,9 @@ Hand overlays are the default. Use --omega_world to opt into world recovery.
 
 from pathlib import Path
 import argparse
+from contextlib import ExitStack
+import signal
+import time
 import gc
 import os
 import sys
@@ -380,6 +383,18 @@ def validate_cli_args(parser, args):
 
 
 def main():
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, interrupted)
+    try:
+        with ExitStack() as resources:
+            return _run(resources)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _run(resources):
     parser = build_arg_parser()
     args = validate_cli_args(parser, parser.parse_args())
 
@@ -428,6 +443,15 @@ def main():
         args.rescale_factor = 2.0 if args.backend in ('hamer', 'htm', 'wilor') else 1.3
 
     img_paths = sorted([img for end in args.file_type for img in img_folder.glob(end)])
+    if args.depth_dir:
+        from observation_frontend.depth_input import prepared_depth
+        started = time.monotonic()
+        original_depth = args.depth_dir
+        args.depth_dir = str(resources.enter_context(prepared_depth(
+            original_depth, out_dir, expected_frames=len(img_paths))))
+        if args.depth_dir != original_depth:
+            print(f'Depth archive prepared in {time.monotonic() - started:.3f}s; '
+                  f'temporary PNGs are removed at exit: {args.depth_dir}', flush=True)
     print(f"Found {len(img_paths)} images in {img_folder}")
     if len(img_paths) == 0:
         raise ValueError(f"No images found in {img_folder} matching {args.file_type}")

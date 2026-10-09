@@ -1,5 +1,44 @@
 # EgoHandKit Project Memory
 
+## Native Ray Integration (2026-10-09)
+
+Merged `feature/mint-frontend` (8a3f7a8) into `perf/hand-render` (ae9e561).
+Retained native source/Python overrides, exporter non-overwrite, FFV1 temporary
+depth preparation and optional final-render hooks. The orchestration adapter
+now lives at `roboego_hand_vis/hand/render_actor.py`, not under Docker. The native
+launcher forwards `--render_actor_workers {0,1,2,4}` and configures PYTHONPATH.
+Default zero preserves the serial renderer and does not require Ray. Historical
+Docker measurements below do not establish native performance or visual parity.
+No model assets or environment packages are provisioned by this merge.
+Validation: 279 tests and 6 subtests passed; one MANO-asset-dependent test skipped.
+The native wrapper forwards the Actor flag while retaining compensation and
+orientation gates. Ray is absent from the current native EgoHandKit environment;
+real native Actor/GPU performance and visual parity remain unverified.
+
+## FFV1 Depth Compatibility (2026-10-09)
+
+Server evidence: depth_archive_v1 output deleted source PNGs and retained lossless
+gray16le FFV1 with millimeter units and zero invalid values. PNG-only depth loading
+therefore failed before backend inference. Compatibility now belongs to EgoHandKit
+run.py, not the external orchestration launcher. Preparation uses temporary PNGs
+and existing logs only; PNG inputs and algorithm parameters remain unchanged.
+Focused CPU tests cover uint16 round-trip, invalid metadata, damaged archives,
+frame mismatch and cleanup. Actual server archive/GPU pipeline remains unverified.
+SIGKILL/machine failure cannot guarantee cleanup; decoded data needs disk space.
+
+## Native Launcher Patch (2026-10-08)
+
+Isolated branch feat/native-hand-launcher starts from feature/mint-frontend
+34b3b1c, not perf/hand-render. Only the shell entrypoint is adapted: configurable
+source paths and optional absolute Python instead of Conda activation; differing
+existing MINT exporters are rejected instead of overwritten. Missing exporters
+are still copied. All algorithm flags and output layout remain unchanged.
+The companion native-hand main-project launcher chains MINT and this script,
+retains all outputs, and serializes its own runs per checkout. Existing caches
+and legacy manual commands remain a concurrency limitation. CPU fake-interpreter
+tests cover two commands, paths with spaces and exporter non-overwrite. No native
+GPU quality/performance validation or environment installation has been done.
+
 Last updated: 2026-09-21.
 
 ## Authority and Snapshot

@@ -6,9 +6,9 @@ set -Eeo pipefail
 # Fixed config
 # ============================================================
 
-CONDA_ENV="egohandkit"
-EGOHANDKIT_ROOT="/home/user/EgoHandKit"
-MINT_ROOT="/home/user/wuji-ego-mint"
+CONDA_ENV="${CONDA_ENV:-egohandkit}"
+EGOHANDKIT_ROOT="${EGOHANDKIT_ROOT:-/home/user/EgoHandKit}"
+MINT_ROOT="${MINT_ROOT:-/home/user/wuji-ego-mint}"
 ACE_ROOT="/home/user/ACE-Ego-Hand"
 LOCAL_MINT_EXPORTER="$EGOHANDKIT_ROOT/scripts/export_egohandkit_cache_mint.py"
 MINT_EXPORTER="$MINT_ROOT/scripts/export_egohandkit_cache.py"
@@ -87,11 +87,14 @@ OUTPUT_ROOT="$(realpath "$OUTPUT_INPUT")"
 # Activate environment
 # ============================================================
 
-command -v conda >/dev/null 2>&1 \
-    || die "conda not found"
-
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV"
+if [[ -n "${EGOHANDKIT_PYTHON:-}" ]]; then
+    [[ -x "$EGOHANDKIT_PYTHON" ]] || die "Python not executable: $EGOHANDKIT_PYTHON"
+else
+    command -v conda >/dev/null 2>&1 || die "conda not found"
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+    conda activate "$CONDA_ENV"
+    EGOHANDKIT_PYTHON="$(command -v python)"
+fi
 
 
 # ============================================================
@@ -131,14 +134,15 @@ if [[ "$FRONTEND" == "mint" ]]; then
     [[ -f "$LOCAL_MINT_EXPORTER" ]] \
         || die "MINT exporter source not found: $LOCAL_MINT_EXPORTER"
 
-    if ! cmp -s "$LOCAL_MINT_EXPORTER" "$MINT_EXPORTER"; then
-        cp "$LOCAL_MINT_EXPORTER" "$MINT_EXPORTER"
-        echo "[exporter] synchronized: $MINT_EXPORTER"
+    if [[ ! -e "$MINT_EXPORTER" ]]; then
+        cp -n "$LOCAL_MINT_EXPORTER" "$MINT_EXPORTER"
     fi
+    cmp -s "$LOCAL_MINT_EXPORTER" "$MINT_EXPORTER" \
+        || die "MINT exporter differs; reconcile explicitly instead of overwriting: $MINT_EXPORTER"
 
     echo "[1/2] MINT -> canonical"
 
-    python "$MINT_EXPORTER" \
+    "$EGOHANDKIT_PYTHON" "$MINT_EXPORTER" \
         --source "$VIDEO" \
         --raw "$RAW_RESULT" \
         --out "$OBSERVATIONS"
@@ -150,7 +154,7 @@ else
 
     echo "[1/2] ACE -> canonical"
 
-    python "$ACE_EXPORTER" \
+    "$EGOHANDKIT_PYTHON" "$ACE_EXPORTER" \
         --source "$VIDEO" \
         --raw "$RAW_RESULT" \
         --out "$OBSERVATIONS"
@@ -169,7 +173,7 @@ echo "[2/2] EgoHandKit"
 
 cd "$EGOHANDKIT_ROOT"
 
-python run.py \
+"$EGOHANDKIT_PYTHON" run.py \
     --input "$VIDEO" \
     --frontend canonical \
     --observations "$OBSERVATIONS" \

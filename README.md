@@ -1,5 +1,27 @@
 # EgoHandKit
 
+## Archived Depth Input
+
+`--depth_dir` also accepts `depth_archive_v1` lossless FFV1 uint16 millimeter
+archives (`depth_uint16_ffv1.avi` or `depth_ffv1.mkv`) alongside archive metadata
+and `fast_foundation_stereo_video_meta.json`. Existing PNG directories take
+precedence. The pipeline decodes to a unique temporary directory under its output,
+shares it across depth stages and final rendering, and removes it on completion,
+exceptions, Ctrl-C or SIGTERM. No additional permanent artifact is produced;
+preparation duration goes to the existing console/log. FFmpeg and ffprobe must be
+on PATH. HEVC12/preview videos are not substitutes. Temporary disk space is needed;
+SIGKILL or a machine crash can leave temporary files behind.
+
+## Native Launcher Configuration
+
+`scripts/run_without_front.sh` accepts `EGOHANDKIT_ROOT`, `MINT_ROOT` and
+`CONDA_ENV` environment overrides with the previous defaults. An absolute
+`EGOHANDKIT_PYTHON` executable bypasses Conda activation; otherwise the original
+activation remains. Algorithm arguments/output layout are unchanged. A missing
+MINT exporter is copied, but an existing different exporter now causes an error
+rather than being overwritten. Resolve differences explicitly. This does not
+provision weights, dependencies or GPU/EGL settings.
+
 For development and handoff, read [AGENTS.md](AGENTS.md),
 [PIPELINE_CONTRACT.md](PIPELINE_CONTRACT.md), and
 [PROJECT_MEMORY.md](PROJECT_MEMORY.md) (decisions, known risks, pending validation).
@@ -12,7 +34,7 @@ The hand-render worktree supports an optional `timings` dictionary on
 Aggregates are wall-clock counts/totals/min/max/first durations, not CUDA kernel
 times; nested totals must not be added together. No GPU synchronization is added.
 The independent replay launcher lives in the hand-opt orchestration repository
-at `docker/ray-env/run-render-replay.sh`. It reads final Parquet and regenerates
+at `python -m roboego_hand_vis.hand.render_replay`. It reads final Parquet and regenerates
 the full render using unchanged fitting settings; it does not run MINT or HaMeR
 inference. The isolated replay also supports local/Actor reuse via the optional
 `offscreen_renderer` argument to `Renderer.render_rgba_multiple`. The caller
@@ -37,18 +59,21 @@ Ray experiment; no Ray code is imported by default EgoHandKit entry points.
 `run.py --render_actor_workers 1|2|4` enables the external orchestration adapter
 for final Parquet rendering, with HaMeR and `--render_hand_tracking_parquet`.
 Default `0` preserves the original renderer and needs no Ray installation.
-Nonzero values require Ray and `docker/ray-env/render_actor.py` from the hand-opt
-orchestration repository on `PYTHONPATH`; CLI validation fails if unavailable.
-The orchestrator's `HAND_RENDER_ACTORS` supplies this option. Use its existing
-`roboego-ray-env:2.58.0-render` image and full-pipeline entrypoint, not the CPU
-lesson image. See that repository's Ray README for the complete command.
+Nonzero values require Ray in the configured EgoHandKit Python and
+`roboego_hand_vis/hand/render_actor.py` from the orchestration repository on
+`PYTHONPATH`; CLI validation fails if unavailable. The native launcher
+`python -m roboego_hand_vis.hand.run --render_actor_workers 4` supplies this
+option and the import path. Its `render.actor_workers` YAML setting defaults
+to zero. See that repository's `roboego_hand_vis/hand/README.md` for setup.
+No Docker is needed. Keep the native shell configuration and FFV1 depth changes
+from `feature/mint-frontend` together with the `perf/hand-render` hooks.
 
 Only rendering is dispatched. Canonical ingestion, inference, gates, smoothing,
 Parquet export, MANO fitting settings and final video encoding are unchanged.
 Ray starts after inference, one frame per Actor remains in flight, and workers
 are closed and killed before shutdown. No automatic retry/resume is provided.
-`final/render_actor_profile.json` records timings and owner counts; retain debug
-outputs to retain this diagnostic when using the documented delivery wrapper.
+`final/render_actor_profile.json` records timings and owner counts; the native
+orchestration launcher retains the complete output tree.
 Actor counts above four and multi-node execution are not validated.
 
 ![EgoHandKit teaser](assets/teaser.gif)
